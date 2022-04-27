@@ -6,6 +6,5 @@
 ## Tai-e Assignments for Static Program Analysis
 </div>
 
-### Getting Started
 
-If you want to do the assignments, please start with "*Overview of Tai-e Assignments*" [[中文](https://tai-e.pascal-lab.net/intro/overview.html)][[English](https://tai-e.pascal-lab.net/en/intro/overview.html)].
+非常感谢李老师和谭老师的tai-e框架和作业平台。我fork了目录用于上传自己的答案。独立完成作业收获更大！
