@@ -23,7 +23,7 @@
 package pascal.taie.analysis.dataflow.analysis.constprop;
 
 import org.junit.Test;
-import pascal.taie.analysis.Tests;
+import pascal.taie.analysis.*;
 
 public class CPTest {
 

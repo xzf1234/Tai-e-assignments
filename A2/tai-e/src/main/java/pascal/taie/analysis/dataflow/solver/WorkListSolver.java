@@ -26,6 +26,9 @@ import pascal.taie.analysis.dataflow.analysis.DataflowAnalysis;
 import pascal.taie.analysis.dataflow.fact.DataflowResult;
 import pascal.taie.analysis.graph.cfg.CFG;
 
+import java.util.LinkedList;
+import java.util.Queue;
+
 class WorkListSolver<Node, Fact> extends Solver<Node, Fact> {
 
     WorkListSolver(DataflowAnalysis<Node, Fact> analysis) {
@@ -34,7 +37,45 @@ class WorkListSolver<Node, Fact> extends Solver<Node, Fact> {
 
     @Override
     protected void doSolveForward(CFG<Node> cfg, DataflowResult<Node, Fact> result) {
-        // TODO - finish me
+//        for (int number = 0; ; number++) {
+//            boolean done = true;
+//            for (Node node : cfg) {
+//                Fact intFact = result.getInFact(node);
+//                cfg.getPredsOf(node).forEach(pre -> {
+//                    if(!cfg.isEntry(node)){
+//                        if (result.getInFact(node) == null)
+//                            result.setInFact(node, analysis.newInitialFact());
+//                    }
+//                    this.analysis.meetInto(result.getOutFact(pre), intFact);
+//                });
+//                if (!cfg.isEntry(node)) {
+//                    boolean changed = analysis.transferNode(node, intFact, result.getOutFact(node));
+//                    if (changed)
+//                        done = false;
+//                }
+//            }
+//            if (done)
+//                return;
+//        }
+        Queue<Node> queue = new LinkedList<>();
+        for (Node node : cfg)
+            queue.add(node);
+        while (!queue.isEmpty()) {
+            Node node = queue.poll();
+            Fact inFact = result.getInFact(node);
+
+            cfg.getPredsOf(node).forEach(pre -> {
+                if (!cfg.isEntry(node)) {
+                    if (result.getInFact(node) == null)
+                        result.setInFact(node, analysis.newInitialFact());
+                }
+                this.analysis.meetInto(result.getOutFact(pre), inFact);
+            });
+            boolean changed = analysis.transferNode(node, inFact, result.getOutFact(node));
+            if(changed){
+                queue.addAll(cfg.getSuccsOf(node));
+            }
+        }
     }
 
     @Override
