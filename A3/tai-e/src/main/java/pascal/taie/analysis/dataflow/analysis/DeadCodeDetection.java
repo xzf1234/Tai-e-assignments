@@ -70,7 +70,58 @@ public class DeadCodeDetection extends MethodAnalysis {
         // keep statements (dead code) sorted in the resulting set
         Set<Stmt> deadCode = new TreeSet<>(Comparator.comparing(Stmt::getIndex));
         // TODO - finish me
-        // Your task is to recognize dead code in ir and add it to deadCode
+        for (Stmt stmt : cfg) {
+            if (stmt instanceof If ifstmt) {
+                var condition = ifstmt.getCondition();
+                var op = condition.getOperator();
+                var lexp = condition.getOperand1();
+                var lres = ConstantPropagation.evaluate(lexp, constants.getInFact(stmt));
+
+                var rexp = condition.getOperand2();
+                var rres = ConstantPropagation.evaluate(rexp, constants.getInFact(stmt));
+
+                if(lres.isConstant() && rres.isConstant()){
+                    boolean isTrue;
+                    int lc = lres.getConstant();
+                    int rc = lres.getConstant();
+                    switch (op){
+                        case EQ:
+                            isTrue = lc == rc; break;
+                        case NE:
+                            isTrue = lc != rc; break;
+                        case LT:
+                            isTrue = lc < rc; break;
+                        case GT:
+                            isTrue = lc > rc; break;
+                        case LE:
+                            isTrue = lc <= rc; break;
+                        case GE:
+                            isTrue = lc >= rc; break;
+                        default: // can not reach here
+                            isTrue = true;
+                    }
+                    // find the
+                    for (Edge<Stmt> edge : cfg.getOutEdgesOf(stmt)) {
+                        if (edge.getKind() == Edge.Kind.IF_TRUE) {
+                            // unreach until a goto ta
+                        } else if (edge.getKind() == Edge.Kind.IF_FALSE) {
+                        }
+                    }
+
+                }
+
+
+            } else if (stmt instanceof SwitchStmt) {
+                for (Edge<Stmt> edge : cfg.getOutEdgesOf(stmt)) {
+                    if (edge.getKind() == Edge.Kind.SWITCH_CASE) {
+
+                    } else if (edge.getKind() == Edge.Kind.SWITCH_DEFAULT) {
+
+                    }
+                }
+            }
+        }
+
         return deadCode;
     }
 
