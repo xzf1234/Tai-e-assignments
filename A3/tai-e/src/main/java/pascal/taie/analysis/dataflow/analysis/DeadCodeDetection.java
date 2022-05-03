@@ -25,7 +25,6 @@ package pascal.taie.analysis.dataflow.analysis;
 import pascal.taie.analysis.MethodAnalysis;
 import pascal.taie.analysis.dataflow.analysis.constprop.CPFact;
 import pascal.taie.analysis.dataflow.analysis.constprop.ConstantPropagation;
-import pascal.taie.analysis.dataflow.analysis.constprop.Value;
 import pascal.taie.analysis.dataflow.fact.DataflowResult;
 import pascal.taie.analysis.dataflow.fact.SetFact;
 import pascal.taie.analysis.graph.cfg.CFG;
@@ -40,14 +39,10 @@ import pascal.taie.ir.exp.FieldAccess;
 import pascal.taie.ir.exp.NewExp;
 import pascal.taie.ir.exp.RValue;
 import pascal.taie.ir.exp.Var;
-import pascal.taie.ir.stmt.AssignStmt;
-import pascal.taie.ir.stmt.If;
-import pascal.taie.ir.stmt.Stmt;
-import pascal.taie.ir.stmt.SwitchStmt;
+import pascal.taie.ir.stmt.*;
+import pascal.taie.util.collection.Pair;
 
-import java.util.Comparator;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 
 public class DeadCodeDetection extends MethodAnalysis {
 
@@ -70,8 +65,35 @@ public class DeadCodeDetection extends MethodAnalysis {
         // keep statements (dead code) sorted in the resulting set
         Set<Stmt> deadCode = new TreeSet<>(Comparator.comparing(Stmt::getIndex));
         // TODO - finish me
-        for (Stmt stmt : cfg) {
-            if (stmt instanceof If ifstmt) {
+
+        Set<Stmt> valid = new TreeSet<>(Comparator.comparing(Stmt::getIndex));
+        Stmt entry = cfg.getEntry();
+        dfs(entry, cfg, valid, constants, liveVars);
+        deadCode.addAll(ir.getStmts());
+        deadCode.removeAll(valid);
+        return deadCode;
+//         deadCode;
+    }
+
+    void dfs(Stmt cur, CFG<Stmt> cfg,
+             Set<Stmt> valid,
+             DataflowResult<Stmt, CPFact> constants,
+             DataflowResult<Stmt, SetFact<Var>> liveVars) {
+        for (Stmt stmt : cfg.getSuccsOf(cur)) {
+            if (valid.contains(stmt))
+                return;
+            valid.add(stmt);
+            if (cfg.getInDegreeOf(stmt) == 0 && !cfg.isEntry(stmt)) {
+                valid.remove(stmt);
+            } else if (stmt instanceof DefinitionStmt definitionStmt) {
+                var lexp = definitionStmt.getLValue();
+                var rexp = definitionStmt.getRValue();
+                if (lexp instanceof Var lvar && !liveVars.getOutFact(stmt).contains(lvar) && hasNoSideEffect(rexp)) {
+                    valid.remove(stmt);
+                }
+                dfs(stmt, cfg, valid, constants, liveVars);
+
+            } else if (stmt instanceof If ifstmt) {
                 var condition = ifstmt.getCondition();
                 var op = condition.getOperator();
                 var lexp = condition.getOperand1();
@@ -80,50 +102,57 @@ public class DeadCodeDetection extends MethodAnalysis {
                 var rexp = condition.getOperand2();
                 var rres = ConstantPropagation.evaluate(rexp, constants.getInFact(stmt));
 
-                if(lres.isConstant() && rres.isConstant()){
+                if (lres.isConstant() && rres.isConstant()) { //语法糖挺有意思的
                     boolean isTrue;
                     int lc = lres.getConstant();
-                    int rc = lres.getConstant();
-                    switch (op){
-                        case EQ:
-                            isTrue = lc == rc; break;
-                        case NE:
-                            isTrue = lc != rc; break;
-                        case LT:
-                            isTrue = lc < rc; break;
-                        case GT:
-                            isTrue = lc > rc; break;
-                        case LE:
-                            isTrue = lc <= rc; break;
-                        case GE:
-                            isTrue = lc >= rc; break;
-                        default: // can not reach here
-                            isTrue = true;
-                    }
-                    // find the
+                    int rc = rres.getConstant();
+                    isTrue = switch (op) {
+                        case EQ -> lc == rc;
+                        case NE -> lc != rc;
+                        case LT -> lc < rc;
+                        case GT -> lc > rc;
+                        case LE -> lc <= rc;
+                        case GE -> lc >= rc;
+                    };
                     for (Edge<Stmt> edge : cfg.getOutEdgesOf(stmt)) {
-                        if (edge.getKind() == Edge.Kind.IF_TRUE) {
-                            // unreach until a goto ta
-                        } else if (edge.getKind() == Edge.Kind.IF_FALSE) {
+                        if (edge.getKind() == Edge.Kind.IF_TRUE && isTrue) {
+                            // kill the true branch
+                            valid.add(edge.getTarget());
+                            dfs(edge.getTarget(), cfg, valid, constants, liveVars);
+                        } else if (edge.getKind() == Edge.Kind.IF_FALSE && !isTrue) {
+                            // kill the false branch
+                            valid.add(edge.getTarget());
+                            dfs(edge.getTarget(), cfg, valid, constants, liveVars);
                         }
                     }
+                } else
+                    dfs(stmt, cfg, valid, constants, liveVars);
 
-                }
-
-
-            } else if (stmt instanceof SwitchStmt) {
-                for (Edge<Stmt> edge : cfg.getOutEdgesOf(stmt)) {
-                    if (edge.getKind() == Edge.Kind.SWITCH_CASE) {
-
-                    } else if (edge.getKind() == Edge.Kind.SWITCH_DEFAULT) {
-
+            } else if (stmt instanceof SwitchStmt switchStmt) {
+                var key = switchStmt.getVar();
+                var keyC = ConstantPropagation.evaluate(key, constants.getInFact(stmt));
+                if (keyC.isConstant()) {
+                    if (switchStmt.getCaseValues().contains(keyC.getConstant())) {
+                        for (Pair<Integer, Stmt> pair : switchStmt.getCaseTargets()) {
+                            if (pair.first() == keyC.getConstant()) {
+                                valid.add(pair.second());
+                                dfs(pair.second(), cfg, valid, constants, liveVars);
+                            }
+                        }
+                    }else { // default case
+                      var defaultTarget=  switchStmt.getDefaultTarget();
+                        valid.add(defaultTarget);
+                        dfs(defaultTarget, cfg, valid, constants, liveVars);
                     }
+                } else {
+                    dfs(stmt, cfg, valid, constants, liveVars);
                 }
-            }
-        }
+            } else
+                dfs(stmt, cfg, valid, constants, liveVars);
 
-        return deadCode;
+        }
     }
+
 
     /**
      * @return true if given RValue has no side effect, otherwise false.
