@@ -23,16 +23,16 @@
 package pascal.taie.analysis.graph.callgraph;
 
 import pascal.taie.World;
+import pascal.taie.ir.exp.InvokeVirtual;
 import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.ir.stmt.Invoke;
+import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.classes.Subsignature;
 
-import java.util.ArrayDeque;
-import java.util.Queue;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Implementation of the CHA algorithm.
@@ -50,7 +50,24 @@ class CHABuilder implements CGBuilder<Invoke, JMethod> {
     private CallGraph<Invoke, JMethod> buildCallGraph(JMethod entry) {
         DefaultCallGraph callGraph = new DefaultCallGraph();
         callGraph.addEntryMethod(entry);
-        // TODO - finish me
+        Queue<JMethod> queue = new LinkedList<>();
+        Set<JMethod> remove = new HashSet<>();
+        queue.add(entry);
+        while (!queue.isEmpty()) {
+            JMethod cur = queue.poll();
+            if (!remove.contains(cur)) {
+                remove.add(cur);
+                callGraph.callSitesIn(cur).forEach(site -> {
+                    var callees = resolve(site);
+                    for (JMethod callee : callees) {
+                        callGraph.addReachableMethod(callee);
+                        Edge<Invoke, JMethod> edge = new Edge<>(CallGraphs.getCallKind(site), site, callee);
+                        callGraph.addEdge(edge);
+                        queue.add(callee);
+                    }
+                });
+            }
+        }
         return callGraph;
     }
 
@@ -58,9 +75,36 @@ class CHABuilder implements CGBuilder<Invoke, JMethod> {
      * Resolves call targets (callees) of a call site via CHA.
      */
     private Set<JMethod> resolve(Invoke callSite) {
-        // TODO - finish me
-        return null;
+        Set<JMethod> set = new HashSet<>();
+        JMethod method = callSite.getContainer();
+        Subsignature subsignature = method.getSubsignature();
+        var call = CallGraphs.getCallKind(callSite);
+        switch (call) {
+            case STATIC -> set.add(method);
+            case SPECIAL -> set.add(dispatch(method.getDeclaringClass(), subsignature));
+            case VIRTUAL -> {
+                InvokeVirtual virtual = (InvokeVirtual) callSite.getInvokeExp();
+                var var = virtual.getBase().getType();
+                set.add(dispatch((JClass) var, subsignature)); // base must be class
+                getSubClassAndDisPatch(set, (JClass) var, subsignature);
+            }
+        }
+        return set;
     }
+
+    private void getSubClassAndDisPatch(Set<JMethod> set, JClass clazz, Subsignature sig) {
+        // find the last class that has no any subclass
+        var subc = hierarchy.getDirectSubclassesOf(clazz);
+        if (subc.isEmpty())
+            set.add(dispatch(clazz, sig));
+        else {
+            for (JClass sub : subc) {
+                getSubClassAndDisPatch(set, sub, sig);
+            }
+        }
+
+    }
+
 
     /**
      * Looks up the target method based on given class and method subsignature.
@@ -69,7 +113,12 @@ class CHABuilder implements CGBuilder<Invoke, JMethod> {
      * can be found.
      */
     private JMethod dispatch(JClass jclass, Subsignature subsignature) {
-        // TODO - finish me
-        return null;
+        JMethod method = jclass.getDeclaredMethod(subsignature);
+        if (method != null)
+            return method;
+        else if (jclass.getSuperClass() != null)
+            return dispatch(jclass.getSuperClass(), subsignature);
+        else
+            return null;
     }
 }
