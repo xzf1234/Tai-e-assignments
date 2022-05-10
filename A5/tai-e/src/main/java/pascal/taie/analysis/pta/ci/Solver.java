@@ -97,6 +97,10 @@ class Solver {
      */
     private void addReachable(JMethod method) {
         // TODO - finish me
+        if (!callGraph.contains(method)) {
+            callGraph.addReachableMethod(method);
+            
+        }
     }
 
     /**
@@ -105,6 +109,11 @@ class Solver {
     private class StmtProcessor implements StmtVisitor<Void> {
         // TODO - if you choose to implement addReachable()
         //  via visitor pattern, then finish me
+        @Override
+        public Void visit(New stmt) {
+
+            return null;
+        }
     }
 
     /**
@@ -133,7 +142,7 @@ class Solver {
     /**
      * Processes instance calls when points-to set of the receiver variable changes.
      *
-     * @param var the variable that holds receiver objects
+     * @param var  the variable that holds receiver objects
      * @param recv a new discovered object pointed by the variable.
      */
     private void processCall(Var var, Obj recv) {
