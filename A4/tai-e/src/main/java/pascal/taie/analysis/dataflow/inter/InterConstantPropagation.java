@@ -38,10 +38,7 @@ import pascal.taie.ir.exp.InvokeExp;
 import pascal.taie.ir.exp.LValue;
 import pascal.taie.ir.exp.RValue;
 import pascal.taie.ir.exp.Var;
-import pascal.taie.ir.stmt.DefinitionStmt;
-import pascal.taie.ir.stmt.Invoke;
-import pascal.taie.ir.stmt.Return;
-import pascal.taie.ir.stmt.Stmt;
+import pascal.taie.ir.stmt.*;
 import pascal.taie.language.classes.JMethod;
 
 import java.util.List;
@@ -84,20 +81,12 @@ public class InterConstantPropagation extends
 
     @Override
     protected boolean transferCallNode(Stmt stmt, CPFact in, CPFact out) {
-        Invoke invoke = (Invoke) stmt;
-        var lvar = invoke.getLValue();
-        if (lvar != null) {
-            icfg.ed
-
-
-        } else
-            out.copyFrom(in);
+        return out.copyFrom(in);
     }
 
     @Override
     protected boolean transferNonCallNode(Stmt stmt, CPFact in, CPFact out) {
-        // TODO - finish me
-        return false;
+        return cp.transferNode(stmt, in, out);
     }
 
     @Override
@@ -139,15 +128,27 @@ public class InterConstantPropagation extends
 
     @Override
     protected CPFact transferReturnEdge(ReturnEdge<Stmt> edge, CPFact returnOut) {
-        var target = (Invoke) edge.getTarget();
-        var src = (Return) edge.getSource();
-        var returnVar = src.getValue();
-        var lvar = target.getLValue();
+        var target = (Invoke) edge.getCallSite();
         CPFact res = new CPFact();
-        if (lvar == null || returnVar == null)
+        var lvar = target.getResult();
+        var vars = edge.getReturnVars();
+        if(lvar == null)
+            return res;
+        Value fin = null;
+        for (Var var : vars) {
+            var v = returnOut.get(var);
+            if (ConstantPropagation.canHoldInt(lvar) && ConstantPropagation.canHoldInt(var)) {
+                if (fin == null)
+                    fin = v;
+                else {
+                    fin = cp.meetValue(fin, v);
+                }
+            }
+        }
+        if (fin == null)
             return res;
         else {
-            res.update(lvar, returnOut.get(returnVar));
+            res.update(lvar, fin);
             return res;
         }
     }

@@ -51,58 +51,110 @@ class CHABuilder implements CGBuilder<Invoke, JMethod> {
         DefaultCallGraph callGraph = new DefaultCallGraph();
         callGraph.addEntryMethod(entry);
         Queue<JMethod> queue = new LinkedList<>();
-        Set<JMethod> remove = new HashSet<>();
         queue.add(entry);
         while (!queue.isEmpty()) {
             JMethod cur = queue.poll();
-            if (!remove.contains(cur)) {
-                remove.add(cur);
-                callGraph.callSitesIn(cur).forEach(site -> {
-                    var callees = resolve(site);
-                    for (JMethod callee : callees) {
-                        callGraph.addReachableMethod(callee);
-                        Edge<Invoke, JMethod> edge = new Edge<>(CallGraphs.getCallKind(site), site, callee);
-                        callGraph.addEdge(edge);
-                        queue.add(callee);
+            if (!callGraph.contains(cur)) {
+                callGraph.addReachableMethod(cur);
+                if (cur.isAbstract())
+                    continue;
+                for (Stmt stmt : cur.getIR().getStmts()) {
+                    if (stmt instanceof Invoke site) {
+                        var callees = resolve(site);
+                        for (JMethod callee : callees) {
+
+                            Edge<Invoke, JMethod> edge = new Edge<>(CallGraphs.getCallKind(site), site, callee);
+                            callGraph.addEdge(edge);
+                            queue.add(callee);
+                        }
                     }
-                });
+                }
+
             }
         }
         return callGraph;
     }
+
+//    private CallGraph<Invoke, JMethod> buildCallGraph(JMethod entry) {
+//        DefaultCallGraph callGraph = new DefaultCallGraph();
+//        callGraph.addEntryMethod(entry);
+//        // TODO -finish me
+//        Queue<JMethod> workList = new LinkedList<JMethod>();
+//        workList.add(entry);
+//        while(!workList.isEmpty()){
+//            JMethod tmpMethod = workList.peek();
+//            workList.remove();
+//            if(!callGraph.contains(tmpMethod)){
+//                callGraph.addReachableMethod(tmpMethod);
+//                callGraph.callSitesIn(tmpMethod).forEach(callSite->{
+//                            Set<JMethod> Target = resolve(callSite);
+//                            for(JMethod method : Target){
+//                                //TODO which type?
+//                                CallKind kind = CallKind.STATIC;
+//                                if(callSite.isVirtual()){
+//                                    kind = CallKind.VIRTUAL;
+//                                }else if(callSite.isStatic()){
+//                                    kind = CallKind.STATIC;
+//                                }else if(callSite.isInterface()){
+//                                    kind = CallKind.INTERFACE;
+//                                }else if(callSite.isSpecial()){
+//                                    kind = CallKind.SPECIAL;
+//                                }else if(callSite.isDynamic()){
+//                                    kind = CallKind.DYNAMIC;
+//                                }
+//                                if(method!=null) {
+//                                    Edge newEdge = new Edge(kind, callSite, method);
+//                                    callGraph.addEdge(newEdge);
+//                                    workList.add(method);
+//                                }
+//                            }
+//                        }
+//                );
+//            }
+//        }
+//
+//        return callGraph;
+//    }
 
     /**
      * Resolves call targets (callees) of a call site via CHA.
      */
     private Set<JMethod> resolve(Invoke callSite) {
         Set<JMethod> set = new HashSet<>();
-        JMethod method = callSite.getContainer();
+        MethodRef method = callSite.getInvokeExp().getMethodRef();
         Subsignature subsignature = method.getSubsignature();
+        JClass clazz = method.getDeclaringClass();
         var call = CallGraphs.getCallKind(callSite);
         switch (call) {
-            case STATIC -> set.add(method);
+            case STATIC -> set.add(clazz.getDeclaredMethod(subsignature));
             case SPECIAL -> set.add(dispatch(method.getDeclaringClass(), subsignature));
-            case VIRTUAL -> {
-                InvokeVirtual virtual = (InvokeVirtual) callSite.getInvokeExp();
-                var var = virtual.getBase().getType();
-                set.add(dispatch((JClass) var, subsignature)); // base must be class
-                getSubClassAndDisPatch(set, (JClass) var, subsignature);
+            case VIRTUAL, INTERFACE -> {
+//                if (callSite.getLValue() == null)
+//                    return set;
+                Queue<JClass> queue = new LinkedList<>();
+                queue.add(clazz);
+                while (!queue.isEmpty()) {
+                    JClass cur = queue.poll();
+                    var dispatched = dispatch(cur, subsignature);
+                    if (dispatched != null)
+                        set.add(dispatched);
+                    if (cur.isInterface()) {
+                        var imples = hierarchy.getDirectImplementorsOf(cur);
+                        queue.addAll(imples);
+                        var subinter = hierarchy.getDirectSubinterfacesOf(cur);
+                        queue.addAll(subinter);
+                    } else {
+                        var subclass = hierarchy.getDirectSubclassesOf(cur);
+                        queue.addAll(subclass);
+                    }
+                }
+//                InvokeVirtual virtual = (InvokeVirtual) callSite.getInvokeExp();
+//                var var = virtual.getBase().getType();
+//                set.add(dispatch((JClass) var, subsignature)); // base must be class
+//                getSubClassAndDisPatch(set, (JClass) var, subsignature);
             }
         }
         return set;
-    }
-
-    private void getSubClassAndDisPatch(Set<JMethod> set, JClass clazz, Subsignature sig) {
-        // find the last class that has no any subclass
-        var subc = hierarchy.getDirectSubclassesOf(clazz);
-        if (subc.isEmpty())
-            set.add(dispatch(clazz, sig));
-        else {
-            for (JClass sub : subc) {
-                getSubClassAndDisPatch(set, sub, sig);
-            }
-        }
-
     }
 
 
@@ -114,7 +166,7 @@ class CHABuilder implements CGBuilder<Invoke, JMethod> {
      */
     private JMethod dispatch(JClass jclass, Subsignature subsignature) {
         JMethod method = jclass.getDeclaredMethod(subsignature);
-        if (method != null)
+        if (method != null && !method.isAbstract())
             return method;
         else if (jclass.getSuperClass() != null)
             return dispatch(jclass.getSuperClass(), subsignature);
