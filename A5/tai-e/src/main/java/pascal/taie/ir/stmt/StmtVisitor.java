@@ -30,6 +30,7 @@ package pascal.taie.ir.stmt;
 public interface StmtVisitor<T> {
 
     default T visit(New stmt) {
+
         return visitDefault(stmt);
     }
 
