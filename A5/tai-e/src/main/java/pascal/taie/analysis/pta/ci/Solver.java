@@ -32,19 +32,13 @@ import pascal.taie.analysis.graph.callgraph.Edge;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.ir.exp.ArrayAccess;
-import pascal.taie.ir.exp.InvokeExp;
-import pascal.taie.ir.exp.NewExp;
 import pascal.taie.ir.exp.Var;
-import pascal.taie.ir.proginfo.MethodRef;
 import pascal.taie.ir.stmt.*;
 import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.JMethod;
-import pascal.taie.util.AnalysisException;
 import pascal.taie.language.type.Type;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 class Solver {
 
@@ -184,14 +178,9 @@ class Solver {
         public Void visit(StoreField stmt) { // T.f = y
             var rvar = stmt.getRValue();
             var varPtr = pointerFlowGraph.getVarPtr(rvar);
-            var rset = varPtr.getPointsToSet();
 
             var field = stmt.getFieldRef().resolve();
             var pointer = pointerFlowGraph.getStaticField(field);
-            var set = pointer.getPointsToSet();
-//            for (Obj obj : set) {
-//                rset.addObject(obj);
-//            }
             addPFGEdge(varPtr, pointer);
             return null;
         }
@@ -232,7 +221,6 @@ class Solver {
                 var lVarPtr = pointerFlowGraph.getVarPtr(lvar);
                 for (Var returnVar : method.getIR().getReturnVars()) {
                     var returnPtr = pointerFlowGraph.getVarPtr(returnVar);
-                    var returnSet = returnPtr.getPointsToSet();
                     // mret -> r
                     addPFGEdge(returnPtr, lVarPtr);
                 }
@@ -247,11 +235,17 @@ class Solver {
      */
     private void addPFGEdge(Pointer source, Pointer target) {
         // TODO - finish me
-        if (!pointerFlowGraph.getSuccsOf(source).contains(target)) {
+        AtomicBoolean flag = new AtomicBoolean(false);
+        //找后继,如果后继为相依的值
+        pointerFlowGraph.getSuccsOf(source).forEach(succ -> {
+            if (succ.equals(target)) {
+                flag.set(true);
+            }
+        });
+        if (!flag.get()) {
             pointerFlowGraph.addEdge(source, target);
-            var sset = source.getPointsToSet();
-            if (!sset.isEmpty()) {
-                workList.addEntry(target, sset);
+            if (!source.getPointsToSet().isEmpty()) {
+                workList.addEntry(target, source.getPointsToSet());
             }
         }
     }
