@@ -36,6 +36,7 @@ import pascal.taie.language.classes.JMethod;
  */
 public class _2CallSelector implements ContextSelector {
 
+    // 2 call and 1 heap
     @Override
     public Context getEmptyContext() {
         return ListContext.make();
@@ -44,18 +45,35 @@ public class _2CallSelector implements ContextSelector {
     @Override
     public Context selectContext(CSCallSite callSite, JMethod callee) {
         // TODO - finish me
-        return null;
+        // container context and callee
+        var context = callSite.getContext();
+        var length = context.getLength();
+        if (length == 0)
+            return ListContext.make(callSite.getCallSite());
+        else // get the last one with new callee
+            return ListContext.make(context.getElementAt(length - 1), callSite.getCallSite());
     }
 
     @Override
     public Context selectContext(CSCallSite callSite, CSObj recv, JMethod callee) {
         // TODO - finish me
-        return null;
+        var context = callSite.getContext();
+        var length = context.getLength();
+        if (length == 0)
+            return ListContext.make(callSite.getCallSite());
+        else
+            return ListContext.make(context.getElementAt(length - 1), callSite.getCallSite());
     }
 
     @Override
     public Context selectHeapContext(CSMethod method, Obj obj) {
         // TODO - finish me
-        return null;
+        var context = method.getContext();
+        var length = context.getLength();
+        if (length == 0)
+            return getEmptyContext();
+        else
+            return ListContext.make(context.getElementAt(length - 1));
+
     }
 }
