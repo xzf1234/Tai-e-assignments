@@ -24,8 +24,10 @@ package pascal.taie.analysis.dataflow.inter;
 
 import pascal.taie.analysis.dataflow.fact.DataflowResult;
 import pascal.taie.analysis.graph.icfg.ICFG;
+import pascal.taie.analysis.graph.icfg.ICFGEdge;
 import pascal.taie.util.collection.SetQueue;
 
+import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -60,9 +62,39 @@ class InterSolver<Method, Node, Fact> {
 
     private void initialize() {
         // TODO - finish me
+        icfg.entryMethods().forEach(method -> {
+            Node entryNode = icfg.getEntryOf(method);
+            result.setInFact(entryNode, analysis.newInitialFact());
+            result.setOutFact(entryNode,analysis.newInitialFact());
+        });
+        for (Node node : icfg) {
+            result.setInFact(node, analysis.newInitialFact());
+            result.setOutFact(node, analysis.newInitialFact());
+        }
     }
 
     private void doSolve() {
         // TODO - finish me
+        workList = new LinkedList<>();
+        for (Node node : icfg) {
+            workList.add(node);
+        }
+        while (!workList.isEmpty()) {
+            Node node = workList.poll();
+            Set<Node> pres = icfg.getPredsOf(node);
+            Fact inFact = result.getInFact(node);
+            for (Node pre : pres) {
+                Fact out = result.getOutFact(pre);
+                for (ICFGEdge<Node> inEdge : icfg.getInEdgesOf(node)) {
+                    if (inEdge.getSource().equals(pre)) {
+                        Fact tmp = analysis.transferEdge(inEdge, out);
+                        analysis.meetInto(tmp, inFact);
+                    }
+                }
+            }
+            boolean changed = analysis.transferNode(node, inFact, result.getOutFact(node));
+            if (changed)
+                workList.addAll(icfg.getSuccsOf(node));
+        }
     }
 }
