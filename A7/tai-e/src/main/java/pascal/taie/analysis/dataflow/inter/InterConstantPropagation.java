@@ -50,7 +50,9 @@ public class InterConstantPropagation extends
 
     public Map<FieldRef, Value> staticFieldMap = new HashMap<>();
     public Map<InstanceFieldAccess, Value> instanceFieldMap = new HashMap<>();
-    public Map<myArrayAccess, Value> arrayAccessMap = new HashMap<>();
+    public Map<ArrayAccess, Value> arrayAccessMap = new HashMap<>();
+
+    public Map<Var, Value> arrayIndex = new HashMap<>();
 
     public PointerAnalysisResult pta;
 
@@ -130,8 +132,8 @@ public class InterConstantPropagation extends
                 var field = loadField.getFieldRef();
                 Value fieldV = staticFieldMap.get(field);
                 CPFact tmp = new CPFact();
+                tmp.copyFrom(in);
                 if (fieldV != null) {
-                    tmp.copyFrom(in);
                     tmp.update(lvar, fieldV);
                 }
                 return out.copyFrom(tmp);
@@ -148,8 +150,8 @@ public class InterConstantPropagation extends
                     }
                 }
                 CPFact tmp = new CPFact();
+                tmp.copyFrom(in);
                 if (newV != null) {
-                    tmp.copyFrom(in);
                     tmp.update(lvar, newV);
                 }
                 return out.copyFrom(tmp);
@@ -159,15 +161,19 @@ public class InterConstantPropagation extends
             ArrayAccess arrayAccess = storeArray.getArrayAccess();
             var rvar = storeArray.getRValue();
             var vravr = in.get(rvar);
-            Var index = arrayAccess.getIndex();
-            Value vindex = in.get(index);
-            if (in.keySet().contains(rvar) && vindex.isConstant()) {
-                myArrayAccess myArrayAccess = new myArrayAccess(arrayAccess.getBase(), vindex.getConstant());
-                Value v = arrayAccessMap.get(myArrayAccess);
+            var index = arrayAccess.getIndex();
+            if (in.keySet().contains(rvar)) {
+                Value v = arrayAccessMap.get(arrayAccess);
                 if (v == null)
-                    arrayAccessMap.put(myArrayAccess, vravr);
+                    arrayAccessMap.put(arrayAccess, vravr);
                 else
-                    arrayAccessMap.put(myArrayAccess, cp.meetValue(vravr, v));
+                    arrayAccessMap.put(arrayAccess, cp.meetValue(vravr, v));
+
+                if(in.keySet().contains(index)){
+                    Value indexValue = in.get(index);
+                    if(indexValue.isConstant())
+                        arrayIndex.put(index,indexValue);
+                }
             }
             return out.copyFrom(in);
 
@@ -176,7 +182,7 @@ public class InterConstantPropagation extends
             ArrayAccess arrayAccess = loadArray.getArrayAccess();
             var lvar = loadArray.getLValue();
             Value newV = null;
-            for (Map.Entry<myArrayAccess, Value> entry : arrayAccessMap.entrySet()) {
+            for (Map.Entry<ArrayAccess, Value> entry : arrayAccessMap.entrySet()) {
                 if (isArrayAlias(arrayAccess, in, entry.getKey())) {
                     if (newV == null)
                         newV = entry.getValue();
@@ -185,8 +191,8 @@ public class InterConstantPropagation extends
                 }
             }
             CPFact tmp = new CPFact();
+            tmp.copyFrom(in);
             if (newV != null) {
-                tmp.copyFrom(in);
                 tmp.update(lvar, newV);
             }
             return out.copyFrom(tmp);
@@ -212,17 +218,24 @@ public class InterConstantPropagation extends
                 && field_1.equals(field_2);
     }
 
-    boolean isArrayAlias(ArrayAccess first, CPFact in, myArrayAccess myArrayAccess) {
+    boolean isArrayAlias(ArrayAccess first, CPFact in, ArrayAccess other) {
         var base_1 = first.getBase();
         Value index_1 = in.get(first.getIndex());
-        var base_2 = myArrayAccess.getBase();
-        int index_2 = myArrayAccess.getIndex();
+        var base_2 = other.getBase();
+        var index = other.getIndex();
+        Value index_2;
+        if(in.keySet().contains(index))
+            index_2 = in.get(other.getIndex());
+        else
+            index_2 = arrayIndex.get(other.getIndex());
+        if(index_2==null)
+            return false;
         if (isOverlap(pta.getPointsToSet(base_1), pta.getPointsToSet(base_2))) {
-            if (index_1 == Value.getUndef()) {
+            if (index_1 == Value.getUndef() || index_2 ==Value.getUndef() ) {
                 return false;
             } else {
-                if (index_1.isConstant()) {
-                    return index_1.getConstant() == index_2;
+                if (index_1.isConstant() && index_2.isConstant()) {
+                    return index_1.getConstant() == index_2.getConstant();
                 } else
                     return true;
             }
@@ -265,6 +278,7 @@ public class InterConstantPropagation extends
                 if (value != null) {
                     out.update(ir.getParam(i), value);
                 }
+                arrayIndex.put(ir.getParam(i),value);
             }
         }
         return out;
@@ -299,41 +313,3 @@ public class InterConstantPropagation extends
     }
 }
 
-class myArrayAccess {
-    Var base;
-    int index;
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        myArrayAccess that = (myArrayAccess) o;
-        return index == that.index && Objects.equals(base, that.base);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(base, index);
-    }
-
-    public myArrayAccess(Var base, int index) {
-        this.base = base;
-        this.index = index;
-    }
-
-    public Var getBase() {
-        return base;
-    }
-
-    public void setBase(Var base) {
-        this.base = base;
-    }
-
-    public int getIndex() {
-        return index;
-    }
-
-    public void setIndex(int index) {
-        this.index = index;
-    }
-}
