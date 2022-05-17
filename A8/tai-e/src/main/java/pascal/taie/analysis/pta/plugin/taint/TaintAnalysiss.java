@@ -28,7 +28,12 @@ import pascal.taie.World;
 import pascal.taie.analysis.pta.PointerAnalysisResult;
 import pascal.taie.analysis.pta.core.cs.context.Context;
 import pascal.taie.analysis.pta.core.cs.element.CSManager;
+import pascal.taie.analysis.pta.core.cs.element.CSObj;
+import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.analysis.pta.cs.Solver;
+import pascal.taie.ir.stmt.Invoke;
+import pascal.taie.language.classes.JMethod;
+import pascal.taie.language.type.Type;
 
 import java.util.Map;
 import java.util.Set;
@@ -61,6 +66,66 @@ public class TaintAnalysiss {
     }
 
     // TODO - finish me
+    public boolean isSource(JMethod method, Type type) {
+        for (Source source : config.getSources()) {
+            if (source.method().equals(method) && source.type().equals(type))
+                return true;
+        }
+        return false;
+    }
+
+    public boolean isSink(JMethod method, int index) {
+        for (Sink sink : config.getSinks()) {
+            if (sink.method().equals(method) && sink.index() == index)
+                return true;
+        }
+        return false;
+    }
+
+    public boolean isBaseToResult(JMethod method, Type type) {
+        for (TaintTransfer transfer : config.getTransfers()) {
+            if (transfer.method().equals(method) &&
+                    transfer.type() == type &&
+                    transfer.from() == -1 &&
+                    transfer.to() == -2)
+                return true;
+        }
+        return false;
+    }
+
+    public boolean isArgToBase(JMethod method, int index, Type type) {
+        for (TaintTransfer transfer : config.getTransfers()) {
+            if (transfer.method().equals(method) &&
+                    transfer.type().equals(type) &&
+                    transfer.from() == index &&
+                    transfer.to() == -1)
+                return true;
+        }
+        return false;
+    }
+
+    public boolean isArgToResult(JMethod method, int index, Type type) {
+        for (TaintTransfer transfer : config.getTransfers()) {
+            if (transfer.method().equals(method) &&
+                    transfer.type().equals(type) &&
+                    transfer.from() == index &&
+                    transfer.to() == -2)
+                return true;
+        }
+        return false;
+    }
+
+    public Obj markObjAsTaint(Invoke l, Type u) {
+        return manager.makeTaint(l, u);
+    }
+
+    public boolean isTaintObj(Obj o) {
+        return manager.isTaint(o);
+    }
+
+    public Context getEmptyContext() {
+        return emptyContext;
+    }
 
     public void onFinish() {
         Set<TaintFlow> taintFlows = collectTaintFlows();
@@ -72,6 +137,25 @@ public class TaintAnalysiss {
         PointerAnalysisResult result = solver.getResult();
         // TODO - finish me
         // You could query pointer analysis results you need via variable result.
+        result.getCSCallGraph().edges().forEach(edge -> {
+            var callSite = edge.getCallSite().getCallSite();
+            var callSiteContext = edge.getCallSite().getContext();
+            var callee = edge.getCallee().getMethod();
+            var calleeContext = edge.getCallee().getContext();
+            // secret = source()
+
+            for (int i = 0; i < callSite.getInvokeExp().getArgCount(); i++) {
+                if (isSink(callee, i)) {
+                    var arg = callSite.getInvokeExp().getArg(i);
+                    var argPointTo = csManager.getCSVar(calleeContext, arg).getPointsToSet();
+                    for (CSObj csObj : argPointTo) {
+                        if (manager.isTaint(csObj.getObject()))
+                            taintFlows.add(new TaintFlow((Invoke) csObj.getObject().getAllocation(), callSite, i));
+                    }
+                }
+            }
+        });
+
         return taintFlows;
     }
 }
