@@ -32,16 +32,12 @@ import pascal.taie.analysis.pta.PointerAnalysisResult;
 import pascal.taie.analysis.pta.PointerAnalysisResultImpl;
 import pascal.taie.analysis.pta.core.cs.CSCallGraph;
 import pascal.taie.analysis.pta.core.cs.context.Context;
-import pascal.taie.analysis.pta.core.cs.element.ArrayIndex;
-import pascal.taie.analysis.pta.core.cs.element.CSCallSite;
 import pascal.taie.analysis.pta.core.cs.element.CSManager;
 import pascal.taie.analysis.pta.core.cs.element.CSMethod;
 import pascal.taie.analysis.pta.core.cs.element.CSObj;
 import pascal.taie.analysis.pta.core.cs.element.CSVar;
-import pascal.taie.analysis.pta.core.cs.element.InstanceField;
 import pascal.taie.analysis.pta.core.cs.element.MapBasedCSManager;
 import pascal.taie.analysis.pta.core.cs.element.Pointer;
-import pascal.taie.analysis.pta.core.cs.element.StaticField;
 import pascal.taie.analysis.pta.core.cs.selector.ContextSelector;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.Obj;
@@ -49,10 +45,8 @@ import pascal.taie.analysis.pta.plugin.taint.TaintAnalysiss;
 import pascal.taie.analysis.pta.pts.PointsToSet;
 import pascal.taie.analysis.pta.pts.PointsToSetFactory;
 import pascal.taie.config.AnalysisOptions;
-import pascal.taie.ir.exp.InvokeExp;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.*;
-import pascal.taie.language.classes.JField;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.Type;
 
@@ -176,7 +170,8 @@ public class Solver {
         public Void visit(Copy stmt) {
             var lptr = csManager.getCSVar(context, stmt.getLValue());
             var rptr = csManager.getCSVar(context, stmt.getRValue());
-            pointerFlowGraph.addEdge(rptr, lptr);
+//            pointerFlowGraph.addEdge(rptr, lptr);
+            addPFGEdge(rptr, lptr);
             return null;
         }
 
@@ -188,7 +183,8 @@ public class Solver {
                 return null;
             var lptr = csManager.getCSVar(context, stmt.getLValue());
             var fieldPtr = csManager.getStaticField(field);
-            pointerFlowGraph.addEdge(fieldPtr, lptr);
+//            pointerFlowGraph.addEdge(fieldPtr, lptr);
+            addPFGEdge(fieldPtr, lptr);
             return null;
         }
 
@@ -200,7 +196,8 @@ public class Solver {
                 return null;
             var rptr = csManager.getCSVar(context, stmt.getRValue());
             var fieldPtr = csManager.getStaticField(field);
-            pointerFlowGraph.addEdge(rptr, fieldPtr);
+//            pointerFlowGraph.addEdge(rptr, fieldPtr);
+            addPFGEdge(rptr, fieldPtr);
             return null;
         }
 
@@ -213,6 +210,17 @@ public class Solver {
             var csCallSite = csManager.getCSCallSite(context, stmt);
             Context ct = contextSelector.selectContext(csCallSite, callee);
             var csCallee = csManager.getCSMethod(ct, callee);
+            Type t = stmt.getInvokeExp().getType();
+
+            if (taintAnalysis.isSource(callee, t)) {
+                // is source must have a result? I think it is.
+                Obj obj = taintAnalysis.markObjAsTaint(stmt, t);
+                CSObj csObj = csManager.getCSObj(taintAnalysis.getEmptyContext(), obj);
+                PointsToSet set = PointsToSetFactory.make(csObj);
+                workList.addEntry(csManager.getCSVar(context, stmt.getLValue()), set);
+                csManager.getCSVar(context, stmt.getLValue()).getPointsToSet().addObject(csObj);
+            }
+
             if (callGraph.addEdge(new Edge<>(CallKind.STATIC, csCallSite
                     , csManager.getCSMethod(ct, callee)))) {
                 addReachable(csCallee);
@@ -222,6 +230,11 @@ public class Solver {
                     var param = callee.getIR().getParam(i);
                     var paramPtr = csManager.getCSVar(ct, param);
                     addPFGEdge(argPtr, paramPtr);
+
+                    if (taintAnalysis.isArgToResult(callee, i, t)) {
+                        var lvarPtr = csManager.getCSVar(context, stmt.getLValue());
+                        addPFGEdge(argPtr, lvarPtr);
+                    }
                 }
             }
             var lvar = stmt.getLValue();
@@ -233,13 +246,6 @@ public class Solver {
                 addPFGEdge(returnVarPtr, lvarPtr);
             }
 
-            Type t = stmt.getInvokeExp().getType();
-            if (taintAnalysis.isSource(callee, t)) {
-                // is source must have a result? I think it is.
-                Obj obj = taintAnalysis.markObjAsTaint(stmt, t);
-                CSObj csObj = csManager.getCSObj(taintAnalysis.getEmptyContext(), obj);
-                csManager.getCSVar(context, lvar).getPointsToSet().addObject(csObj);
-            }
 
             return null;
         }
@@ -302,7 +308,19 @@ public class Solver {
                         var arrayIndex = csManager.getArrayIndex(csObj);
                         addPFGEdge(rvarPtr, arrayIndex);
                     }
-                    processCall(varPtr, csObj);
+                    if (!taintAnalysis.isTaintObj(csObj.getObject())){
+                        processCall(varPtr, csObj);
+                        for (Stmt stmt : var.getMethod().getIR().getStmts()) {
+                            if (stmt instanceof Copy copy) {
+                                var lptr = csManager.getCSVar(context, copy.getLValue());
+                                var rptr = csManager.getCSVar(context, copy.getRValue());
+                                for (CSObj obj : rptr.getPointsToSet()) {
+                                    if(taintAnalysis.isTaintObj(obj.getObject()))
+                                        lptr.getPointsToSet().addObject(obj);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -354,6 +372,8 @@ public class Solver {
             var thisVarPtr = csManager.getCSVar(ct, callee.getIR().getThis());
             PointsToSet set = PointsToSetFactory.make(recvObj);
             workList.addEntry(thisVarPtr, set);
+
+
             if (callGraph.addEdge(new Edge<>(CallGraphs.getCallKind(invoke),
                     csCallSite, csCallee))) {
                 addReachable(csCallee);
@@ -384,17 +404,17 @@ public class Solver {
                     // is source must have a result? I think it is.
                     Obj obj = taintAnalysis.markObjAsTaint(invoke, t);
                     CSObj csObj = csManager.getCSObj(taintAnalysis.getEmptyContext(), obj);
-                    csManager.getCSVar(context, lvar).getPointsToSet().addObject(csObj);
+//                    csManager.getCSVar(context, lvar).getPointsToSet().addObject(csObj);
+                    PointsToSet set1 = PointsToSetFactory.make(csObj);
+                    workList.addEntry(csManager.getCSVar(context, invoke.getLValue()), set1);
+                    csManager.getCSVar(context, invoke.getLValue()).getPointsToSet().addObject(csObj);
                 }
 
                 if (taintAnalysis.isBaseToResult(callee, t)) {
                     CSVar base = csManager.getCSVar(context, recv.getVar());
                     addPFGEdge(base, csManager.getCSVar(context, lvar));
                 }
-
             }
-
-
         }
     }
 

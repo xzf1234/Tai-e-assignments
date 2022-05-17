@@ -147,7 +147,7 @@ public class TaintAnalysiss {
             for (int i = 0; i < callSite.getInvokeExp().getArgCount(); i++) {
                 if (isSink(callee, i)) {
                     var arg = callSite.getInvokeExp().getArg(i);
-                    var argPointTo = csManager.getCSVar(calleeContext, arg).getPointsToSet();
+                    var argPointTo = csManager.getCSVar(callSiteContext, arg).getPointsToSet();
                     for (CSObj csObj : argPointTo) {
                         if (manager.isTaint(csObj.getObject()))
                             taintFlows.add(new TaintFlow((Invoke) csObj.getObject().getAllocation(), callSite, i));
