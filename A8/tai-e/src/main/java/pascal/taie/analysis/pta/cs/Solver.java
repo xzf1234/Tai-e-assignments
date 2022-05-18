@@ -218,7 +218,6 @@ public class Solver {
                 CSObj csObj = csManager.getCSObj(taintAnalysis.getEmptyContext(), obj);
                 PointsToSet set = PointsToSetFactory.make(csObj);
                 workList.addEntry(csManager.getCSVar(context, stmt.getLValue()), set);
-                csManager.getCSVar(context, stmt.getLValue()).getPointsToSet().addObject(csObj);
             }
 
             if (callGraph.addEdge(new Edge<>(CallKind.STATIC, csCallSite
@@ -310,16 +309,6 @@ public class Solver {
                     }
                     if (!taintAnalysis.isTaintObj(csObj.getObject())){
                         processCall(varPtr, csObj);
-                        for (Stmt stmt : var.getMethod().getIR().getStmts()) {
-                            if (stmt instanceof Copy copy) {
-                                var lptr = csManager.getCSVar(context, copy.getLValue());
-                                var rptr = csManager.getCSVar(context, copy.getRValue());
-                                for (CSObj obj : rptr.getPointsToSet()) {
-                                    if(taintAnalysis.isTaintObj(obj.getObject()))
-                                        lptr.getPointsToSet().addObject(obj);
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -384,7 +373,8 @@ public class Solver {
                     var param = callee.getIR().getParam(i);
                     addPFGEdge(argPtr, csManager.getCSVar(ct, param));
 
-                    if (taintAnalysis.isArgToBase(callee, i, t)) {
+                    // pay attention, type is different here.
+                    if (taintAnalysis.isArgToBase(callee, i, recv.getVar().getType())) {
                         CSVar base = csManager.getCSVar(context, recv.getVar());
                         addPFGEdge(argPtr, base);
                     }
@@ -407,7 +397,6 @@ public class Solver {
 //                    csManager.getCSVar(context, lvar).getPointsToSet().addObject(csObj);
                     PointsToSet set1 = PointsToSetFactory.make(csObj);
                     workList.addEntry(csManager.getCSVar(context, invoke.getLValue()), set1);
-                    csManager.getCSVar(context, invoke.getLValue()).getPointsToSet().addObject(csObj);
                 }
 
                 if (taintAnalysis.isBaseToResult(callee, t)) {
